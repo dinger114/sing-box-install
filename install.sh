@@ -539,8 +539,6 @@ install_service() {
 
   [[ $WAS_INSTALLED == true ]] && return 0
 
-  wait $PID
-
   if systemctl enable sing-box ;then
     echo "INFO: Enabled sing-box.service"
     service_control start
@@ -740,17 +738,19 @@ main() {
     exit 1
   fi
 
+  # Step 1: Build or download sing-box binary (serial execution, no background)
   if [[ $TYPE == go ]];then
     [[ -z $GO_TYPE ]] && GO_TYPE=default
-    [[ $WIN == false ]] && check_root
-    go_install &
-    BUILD_PID=$!
+    if [[ $WIN == false ]]; then
+      check_root
+    fi
+    go_install
   else
     check_root
-    curl_install &
-    BUILD_PID=$!
+    curl_install
   fi
 
+  # Step 2: Install service components (only for non-Windows install)
   if [[ $WIN == false ]];then
     if [[ -z $INSTALL_USER ]];then
       INSTALL_USER=sing-box
@@ -765,13 +765,6 @@ main() {
     install_config
     install_service
     install_compiletion
-  fi
-
-  wait $BUILD_PID
-  BUILD_EXIT_CODE=$?
-  if [[ $BUILD_EXIT_CODE -ne 0 ]];then
-    echo -e "${ERROR}ERROR:${END} Build process failed with exit code $BUILD_EXIT_CODE"
-    exit $BUILD_EXIT_CODE
   fi
 
   RESTART=$(cat $RESTART_TEMP)
