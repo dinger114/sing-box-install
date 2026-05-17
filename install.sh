@@ -21,6 +21,8 @@ CURRENT_GROUP=
 NEED_REMOVE_TEMP="$(mktemp)"
 NEED_REMOVE=( "$RESTART_TEMP" "$NEED_REMOVE_TEMP" )
 REMOVE_TEMP=false
+DEFAULT_BRANCH="main-next"
+SING_BOX_REPO="SagerNet/sing-box"
 
 identify_the_operating_system_and_architecture() {
   if ! [[ "$(uname)" == 'Linux' ]]; then
@@ -79,7 +81,7 @@ identify_the_operating_system_and_architecture() {
   fi
   # Do not combine this judgment condition with the following judgment condition.
   ## Be aware of Linux distribution like Gentoo, which kernel supports switch between Systemd and OpenRC.
-  if [[ -f /.dockerenv ]] || grep -q 'docker\|lxc' /proc/1/cgroup && [[ "$(type -P systemctl)" ]]; then
+  if [[ -f /.dockerenv ]] || grep -q 'docker\|lxc' /proc/1/cgroup && [[ "$(command -v systemctl)" ]]; then
     true
   elif [[ -d /run/systemd/system ]] || grep -q systemd <(ls -l /usr/bin/init); then
     true
@@ -87,27 +89,27 @@ identify_the_operating_system_and_architecture() {
     echo "${ERROR}ERROR:${END} Only Linux distributions using systemd are supported."
     exit 1
   fi
-  if [[ "$(type -P apt)" ]]; then
+  if [[ "$(command -v apt)" ]]; then
     PACKAGE_MANAGEMENT_INSTALL='apt -y --no-install-recommends install'
     PACKAGE_MANAGEMENT_REMOVE='apt purge'
     package_provide_tput='ncurses-bin'
-  elif [[ "$(type -P dnf)" ]]; then
+  elif [[ "$(command -v dnf)" ]]; then
     PACKAGE_MANAGEMENT_INSTALL='dnf -y install'
     PACKAGE_MANAGEMENT_REMOVE='dnf remove'
     package_provide_tput='ncurses'
-  elif [[ "$(type -P yum)" ]]; then
+  elif [[ "$(command -v yum)" ]]; then
     PACKAGE_MANAGEMENT_INSTALL='yum -y install'
     PACKAGE_MANAGEMENT_REMOVE='yum remove'
     package_provide_tput='ncurses'
-  elif [[ "$(type -P zypper)" ]]; then
+  elif [[ "$(command -v zypper)" ]]; then
     PACKAGE_MANAGEMENT_INSTALL='zypper install -y --no-recommends'
     PACKAGE_MANAGEMENT_REMOVE='zypper remove'
     package_provide_tput='ncurses-utils'
-  elif [[ "$(type -P pacman)" ]]; then
+  elif [[ "$(command -v pacman)" ]]; then
     PACKAGE_MANAGEMENT_INSTALL='pacman -Syy --noconfirm'
     PACKAGE_MANAGEMENT_REMOVE='pacman -Rsn'
     package_provide_tput='ncurses'
-  elif [[ "$(type -P emerge)" ]]; then
+  elif [[ "$(command -v emerge)" ]]; then
     PACKAGE_MANAGEMENT_INSTALL='emerge -qv'
     PACKAGE_MANAGEMENT_REMOVE='emerge -Cv'
     package_provide_tput='ncurses'
@@ -120,7 +122,7 @@ identify_the_operating_system_and_architecture() {
 install_software() {
   package_name="$1"
   file_to_detect="$2"
-  type -P "$file_to_detect" > /dev/null 2>&1 && return
+  command -v "$file_to_detect" > /dev/null 2>&1 && return
   [[ $EUID != 0 ]] && echo -e "${ERROR}ERROR:${END} You need to install \"$package_name\" first." && exit 1
   echo -e "${WARN}WARN:${END} $package_name not installed, installing." && sleep 1
   if ${PACKAGE_MANAGEMENT_INSTALL} "$package_name"; then
@@ -132,14 +134,17 @@ install_software() {
 }
 
 install_file() {
+  local STDIN=
   if [[ "$1" == "/dev/stdin" ]];then
     STDIN=$(mktemp)
-    cat /dev/stdin > $STDIN
+    trap 'rm -f "$STDIN"' RETURN EXIT
+    cat /dev/stdin > "$STDIN"
     local SOURCE=$STDIN DEST=$2 METHO=$3
   else
     local SOURCE=$1 DEST=$2 METHO=$3
   fi
 
+  local OWNER GROUP
   if [[ ! -z "$5" ]];then
     OWNER=$4 GROUP=$5
   else
@@ -154,7 +159,7 @@ install_file() {
   fi
 
   if ! [[ -z $STDIN ]];then
-    echo $STDIN >> $NEED_REMOVE_TEMP
+    echo "$STDIN" >> "$NEED_REMOVE_TEMP"
   fi
 }
 
@@ -186,7 +191,7 @@ check_root() {
 }
 
 curl() {
-  if ! $(type -P curl) -# -L -q --retry 5 --retry-delay 5 --retry-max-time 60 "$@";then
+  if ! $(command -v curl) -# -L -q --retry 5 --retry-delay 5 --retry-max-time 60 -f "$@";then
     echo -e "${ERROR}ERROR:${END} Curl Failed, check your network"
     exit 1
   fi
@@ -240,11 +245,11 @@ go_install() {
     remove_files
     exit 0
   fi
-  if ! GO_PATH=$(type -P go);then
+  if ! GO_PATH=$(command -v go);then
     [[ $EUID == 0 ]] && bash -c "$(curl -L https://github.com/chise0713/go-install/raw/master/install.sh)" @ install
     if [[ $EUID != 0 ]];then
       PATH="$PATH:$HOME/.cache/go/bin"     
-      if ! GO_PATH=$(type -P go);then
+      if ! GO_PATH=$(command -v go);then
         bash -c "$(curl -L https://github.com/chise0713/go-install/raw/master/install.sh)" @ install --path="$PREFIX"
       else
         echo "INFO: GO Found, PATH=$GO_PATH"
@@ -254,7 +259,12 @@ go_install() {
     echo "INFO: GO Found, PATH=$GO_PATH"
   fi
   install_software "git" "git"
-  [[ -z $BRANCH ]] && BRANCH="main-next"
+  if [[ -z $BRANCH ]];then
+    echo -e "INFO: No branch specified, detecting default branch of $SING_BOX_REPO..."
+    DEFAULT_BRANCH=$(git ls-remote --symref "https://github.com/$SING_BOX_REPO.git" HEAD 2>/dev/null | \
+      grep -oP 'refs/heads/\K\S+' || echo "$DEFAULT_BRANCH")
+    BRANCH="$DEFAULT_BRANCH"
+  fi
   echo -e "INFO: Current compile \"releaseTag / branch\" is $BRANCH"
   BRANCH="origin/$BRANCH"
   if [[ $WIN == true ]];then 
@@ -294,9 +304,9 @@ go_install() {
 
   if [[ $GO_TYPE == default ]];then
     echo -e "\
-Using offcial default Tags: with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api.\
+Using offcial default Tags: with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api,with_cloudflared.\
 "
-    TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api"
+    TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api,with_cloudflared"
   elif [[ $GO_TYPE == custom ]]; then
     echo -e "\
 Using custom config:
@@ -734,11 +744,11 @@ main() {
     [[ -z $GO_TYPE ]] && GO_TYPE=default
     [[ $WIN == false ]] && check_root
     go_install &
-    PID=$!
+    BUILD_PID=$!
   else
     check_root
     curl_install &
-    PID=$!
+    BUILD_PID=$!
   fi
 
   if [[ $WIN == false ]];then
@@ -757,7 +767,12 @@ main() {
     install_compiletion
   fi
 
-  wait $PID
+  wait $BUILD_PID
+  BUILD_EXIT_CODE=$?
+  if [[ $BUILD_EXIT_CODE -ne 0 ]];then
+    echo -e "${ERROR}ERROR:${END} Build process failed with exit code $BUILD_EXIT_CODE"
+    exit $BUILD_EXIT_CODE
+  fi
 
   RESTART=$(cat $RESTART_TEMP)
   if [[ $RESTART == true ]];then
@@ -782,32 +797,38 @@ Thanks \033[38;5;208m@chika0801${END}.
 usage: install.sh [ACTION] [OPTION]...
 
 ACTION:
-install                   Install/Update sing-box
-compile                   Compile sing-box
+install                   Install/Update sing-box (default: download pre-built binary via curl)
+compile                   Compile sing-box from source (implies --go)
 remove                    Remove sing-box
-help                      Show help
-If no action is specified, then help will be selected
+help                      Show this help message
+
+If no action is specified, help will be displayed.
 
 OPTION:
-  install:
-    --beta                    Install latest Pre-release version of sing-box. 
-    --go                      If it's specified, the scrpit will use go to compile sing-box then install.
-    --version=[Version]       sing-box version tag, if you specified it, the script will install your custom version sing-box. 
-    --user=[User]             Install sing-box in specified user, e.g, --user=root
+  install (curl download):
+    --beta                    Install the latest pre-release (beta) version of sing-box.
+    --version=[Version]       Install a specific version tag (e.g., --version=1.3.0).
+    --go                      Force compilation from source instead of downloading binary.
+    --user=[User]             Run sing-box service as the specified user (e.g., --user=root).
+                              Default: creates a 'sing-box' system user automatically.
 
-  compile: 
-  [shared with install when it is using go &  If theres no \`go\` in the machine, script will install go to \`\$HOME/.cache\`]
-    --tags=[Tags]             sing-box compile tags, the script will use your custom tags to compile sing-box. 
-                              Default https://github.com/SagerNet/sing-box/blob/dev-next/Makefile#L5
-    --prefix=[Path]           The path of scrpit store sing-box repository and go binary. 
-                              Default \`\$HOME/.cache\`
-    --branch=[Branch/Tag]     The scrpit will compile your custom \`branch\` / \`release tag\` of sing-box.
-    --cgo                     Set \`CGO_ENABLED\` environment variable to 1
-    --win                     The scrpit will use go to compile windows version of sing-box. 
-    --rm                      Remove temporary files, include sing-box repository and go binary.
-  
-  remove:
-    --purge                   Remove all the sing-box files, include configs, compiletion etc.
+  compile & install (go source):
+    Options below are shared with install when --go is used.
+    If \`go\` is not installed, the script will automatically download it to \`\$HOME/.cache\`.
+
+    --tags=[Tags]             Custom Go build tags for compilation (comma-separated).
+                              Default: with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api,with_cloudflared
+    --prefix=[Path]           Directory to store the sing-box repository and Go binary.
+                              Default: \`\$HOME/.cache\`
+    --branch=[Branch/Tag]     Git branch or tag to compile from.
+                              Default: auto-detected from remote repository (typically 'main-next').
+    --cgo                     Enable CGO (sets CGO_ENABLED=1). Required for tags: with_lwip, with_embedded_tor.
+    --win                     Cross-compile a Windows (amd64) binary instead of Linux.
+    --rm                      Remove cached sing-box repository and Go binary after compilation.
+
+  remove (uninstall):
+    --purge                   Also remove configuration files (/usr/local/etc/sing-box/),
+                              runtime data (/var/lib/sing-box/), and legacy data (/usr/local/share/sing-box).
 "
   exit 0
 }
