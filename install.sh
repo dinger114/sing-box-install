@@ -304,9 +304,9 @@ go_install() {
 
   if [[ $GO_TYPE == default ]];then
     echo -e "\
-Using offcial default Tags: with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api,with_cloudflared.\
+Using offcial default Tags: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,with_cloudflared.\
 "
-    TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api,with_cloudflared"
+    TAGS="with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,with_cloudflared"
   elif [[ $GO_TYPE == custom ]]; then
     echo -e "\
 Using custom config:
@@ -810,7 +810,7 @@ OPTION:
     If \`go\` is not installed, the script will automatically download it to \`\$HOME/.cache\`.
 
     --tags=[Tags]             Custom Go build tags for compilation (comma-separated).
-                              Default: with_gvisor,with_quic,with_dhcp,with_wireguard,with_ech,with_utls,with_reality_server,with_clash_api,with_cloudflared
+                              Default: with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,with_cloudflared
     --prefix=[Path]           Directory to store the sing-box repository and Go binary.
                               Default: \`\$HOME/.cache\`
     --branch=[Branch/Tag]     Git branch or tag to compile from.
